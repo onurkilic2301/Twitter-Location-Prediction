@@ -14,7 +14,10 @@ import urllib
 
 def queryOnline(query):    
     url = "https://api.duckduckgo.com/?q={}&format=json".format(query)
-    response = urllib.urlopen(url)
+    try:
+        response = urllib.urlopen(url)
+    except:
+        return None
     try:
         data = json.loads(response.read())
     except:
@@ -68,7 +71,7 @@ def checkForCountryInKeywords(word,df_country,df_prediction,eps):
     if(word in df_country):
         code = df_country[word]
         df_prediction[code] = df_prediction[code]/eps
-        df_prediction = df_prediction * eps*10
+        df_prediction = df_prediction * eps
     return df_prediction
 
 def checkForCityInKeywords(word,df_city,df_prediction,eps):
@@ -76,7 +79,7 @@ def checkForCityInKeywords(word,df_city,df_prediction,eps):
         city_populations = df_city[word]
         populations = pd.Series(data = [eps]*len(df_prediction),index = df_prediction.index)
         populations.update(city_populations/float(10**8))
-        df_prediction = df_prediction.multiply(populations)*10
+        df_prediction = df_prediction.multiply(populations)
     return df_prediction
 
 def checkForRegionInKeywords(word,df_region,df_prediction,eps):
@@ -84,16 +87,26 @@ def checkForRegionInKeywords(word,df_region,df_prediction,eps):
         region_populations = df_region[word]
         populations = pd.Series(data = [eps]*len(df_prediction),index = df_prediction.index)
         populations.update(region_populations/float(10**8))
-        df_prediction = df_prediction.multiply(populations)*10
+        df_prediction = df_prediction.multiply(populations)
     return df_prediction
 
 def checkForLanguage(lang,df_CClang,df_prediction,eps):
+    eps = 0.01
     if(len(lang)>0):
         langs = pd.Series(data = [eps]*len(df_prediction),index = df_prediction.index)
         lang_count = df_CClang.groupby("CC").size()[df_CClang[df_CClang["lang"] == lang]["CC"]]
         lang_count = lang_count[~lang_count.index.duplicated()]
         langs.update(1.0/lang_count)
         df_prediction = df_prediction.multiply(langs)
+    return df_prediction
+def checkForState(keywords,us_states,df_prediction):
+    confidence = 10
+    if(df_prediction.min() != df_prediction["us"]):
+        confidence = 10000
+    for word in keywords:
+        if(word in us_states):
+            df_prediction["us"] = df_prediction["us"]*confidence
+            return df_prediction
     return df_prediction
 
 def searchOnline(location,df_prediction,df_country,df_city,df_region,eps):
@@ -106,33 +119,38 @@ def searchOnline(location,df_prediction,df_country,df_city,df_region,eps):
             df_prediction = checkForRegionInKeywords(key,df_region,df_prediction,eps)
     return df_prediction
 
+def searchOnline2(location,df_prediction,df_country,df_city,df_region,eps):
+    keywords = keywordGenerator(2,location)
+    result =[]
+    if(keywords):
+        for word in keywords:
+            search = locationsInQuery(word)
+            if(search):   
+                result.extend(search)
+    if(result):
+        for key in result:
+            df_prediction = checkForCountryInKeywords(key,df_country,df_prediction,eps)
+            df_prediction = checkForCityInKeywords(key,df_city,df_prediction,eps)
+            df_prediction = checkForRegionInKeywords(key,df_region,df_prediction,eps)
+    return df_prediction
 # Naive Bayes Function
 def NaiveBayesLocationLanguageState(user,df_city,df_region,df_country,populationCC,df_CClang,country_codes,us_states,n):
-    eps = 0.00001
+    eps_in = 0.00001
     location = unidecode.unidecode(user["location"]).lower()
     lang = user["lang"].lower()
     keywords = keywordGenerator(n,location)
     df_prediction = pd.Series(data=np.array([1]*len(country_codes)),index=country_codes)
-    if(len(keywords) == 0):
-        return None
-    #doc = nlp(user["location"])
-    #locs = []
-    #for ent in doc.ents:
-    #    if(ent.label_ == u"LOC"):
-    #        locs.append(unidecode.unidecode(ent.text).lower())
-    #for word in locs:
-    #    df_prediction = checkForCountryInKeywords(word,df_country,df_prediction,eps)
-    #    df_prediction = checkForCityInKeywords(word,df_city,df_prediction,eps)
-    #    df_prediction = checkForRegionInKeywords(word,df_region,df_prediction,eps)
-    for word in keywords:
-        df_prediction = checkForCountryInKeywords(word,df_country,df_prediction,eps)
-        df_prediction = checkForCityInKeywords(word,df_city,df_prediction,eps)
-        df_prediction = checkForRegionInKeywords(word,df_region,df_prediction,eps)
-        if(word in us_states):
-             df_prediction["us"] = df_prediction["us"]*(1000)
-    if(sum(df_prediction == 1) == len(country_codes)):
-        df_prediction = searchOnline(location,df_prediction,df_country,df_city,df_region,eps)
+    if(len(keywords) != 0):    
+        for word in keywords:
+            eps = eps_in *10**-(2*word.count(" "))
+            df_prediction = checkForCountryInKeywords(word,df_country,df_prediction,eps)
+            df_prediction = checkForCityInKeywords(word,df_city,df_prediction,eps)
+            df_prediction = checkForRegionInKeywords(word,df_region,df_prediction,eps)
+        checkForState(keywords,us_states,df_prediction)
+        if(sum(df_prediction == 1) == len(country_codes)):
+            df_prediction = searchOnline2(location,df_prediction,df_country,df_city,df_region,eps)
     if("en" not in lang):
+        eps = eps_in
         df_prediction = checkForLanguage(lang,df_CClang,df_prediction,eps)
     if(sum(df_prediction == 1) == len(country_codes)):
         return None
@@ -149,25 +167,26 @@ def clearAmbiguity(keywords,user,nlp=nlp):
             locs.append(unidecode.unidecode(ent.text).lower())
     keywords.extend(locs)
     return keywords
+
 # Naive Bayes Function2
 def NaiveBayesLocationLanguageState2(user,df_city,df_region,df_country,populationCC,df_CClang,country_codes,us_states,n):
-    eps = 0.00001
+    eps_in = 0.00001
     location = unidecode.unidecode(user["location"]).lower()
     lang = user["lang"].lower()
     keywords = keywordGenerator(n,location)
     df_prediction = pd.Series(data=np.array([1]*len(country_codes)),index=country_codes)
     if(len(keywords) == 0):
-        return None
-    keywords = clearAmbiguity(keywords,user)
-    for word in keywords:
-        df_prediction = checkForCountryInKeywords(word,df_country,df_prediction,eps)
-        df_prediction = checkForCityInKeywords(word,df_city,df_prediction,eps)
-        df_prediction = checkForRegionInKeywords(word,df_region,df_prediction,eps)
-        if(word in us_states):
-             df_prediction["us"] = df_prediction["us"]*(1000)
-    if(sum(df_prediction == 1) == len(country_codes)):
-        df_prediction = searchOnline(location,df_prediction,df_country,df_city,df_region,eps)
+        keywords = clearAmbiguity(keywords,user)
+        for word in keywords:
+            eps = eps_in *10**-(2*word.count(" "))
+            df_prediction = checkForCountryInKeywords(word,df_country,df_prediction,eps)
+            df_prediction = checkForCityInKeywords(word,df_city,df_prediction,eps)
+            df_prediction = checkForRegionInKeywords(word,df_region,df_prediction,eps)
+        checkForState(keywords,us_states,df_prediction)
+        if(sum(df_prediction == 1) == len(country_codes)):
+            df_prediction = searchOnline2(location,df_prediction,df_country,df_city,df_region,eps)
     if("en" not in lang):
+        eps = eps_in
         df_prediction = checkForLanguage(lang,df_CClang,df_prediction,eps)
     if(sum(df_prediction == 1) == len(country_codes)):
         return None
@@ -187,10 +206,18 @@ def predict_location2(user):
 
 def possible_location_distribution(user):
     df_prediction = NaiveBayesLocationLanguageState(user,df_city,df_region,df_country,populationCC,df_CClang,country_codes,us_states,3)
-    if(type(df_prediction) != type(None)) 
+    if(type(df_prediction) != type(None)) :
         df_possible = df_prediction.nlargest(5)
         df_possible = df_possible/df_possible.sum()
         return df_possible
+
+def predict(location,language = "en"):
+    user = {"location": location,"lang": language}
+    return predict_location(user)
+
+def predict_top_five(location,language = "en"):
+    user = {"location": location,"lang": language}
+    return possible_location_distribution(user)
 
 data_dir = "../data/"
 # Reading city,region country and population data 
