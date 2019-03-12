@@ -102,22 +102,13 @@ def checkForLanguage(lang,df_CClang,df_prediction,eps):
 def checkForState(keywords,us_states,df_prediction):
     confidence = 10
     if(df_prediction.min() != df_prediction["us"]):
-        confidence = 10000
+        confidence = 1000
     for word in keywords:
         if(word in us_states):
             df_prediction["us"] = df_prediction["us"]*confidence
             return df_prediction
     return df_prediction
 
-def searchOnline(location,df_prediction,df_country,df_city,df_region,eps):
-    keywords = loc_tokenizer(location)
-    result = locationsInQuery("_".join(keywords))
-    if(result):
-        for key in result:
-            df_prediction = checkForCountryInKeywords(key,df_country,df_prediction,eps)
-            df_prediction = checkForCityInKeywords(key,df_city,df_prediction,eps)
-            df_prediction = checkForRegionInKeywords(key,df_region,df_prediction,eps)
-    return df_prediction
 
 def searchOnline2(location,df_prediction,df_country,df_city,df_region,eps):
     keywords = keywordGenerator(2,location)
@@ -219,7 +210,7 @@ def predict_top_five(location,language = "en"):
     user = {"location": location,"lang": language}
     return possible_location_distribution(user)
 
-data_dir = "../data/"
+data_dir = "/Users/onurkilicoglu/Desktop/MIKS_Internship/location_prediction/data"
 # Reading city,region country and population data 
 df = pd.read_csv(os.path.join(data_dir,"worldcities.txt"))
 
